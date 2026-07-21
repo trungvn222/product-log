@@ -1,0 +1,71 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+model ProductLog {
+  id             String   @id @default(cuid())
+  shop           String
+  productId      String
+  productTitle   String?
+  action         String // created | updated | deleted | added_to_collection | removed_from_collection
+  field          String? // e.g. title, price, status, tags (null for created/deleted/collection actions)
+  oldValue       String?
+  newValue       String?
+  collectionId   String? // set for added_to_collection / removed_from_collection
+  collectionTitle String?
+  source         String // webhook topic that produced this entry
+  actor          String? // best-effort "who made this change" (app name or staff name), see lib/event-actor.server.ts
+  createdAt      DateTime @default(now())
+
+  @@index([shop, productId])
+  @@index([shop, createdAt])
+}
+
+model ProductSnapshot {
+  shop      String
+  productId String
+  data      String // JSON-encoded last known product payload, used to diff future updates
+  updatedAt DateTime @updatedAt
+
+  @@id([shop, productId])
+}
+
+model CollectionSnapshot {
+  shop         String
+  collectionId String
+  productIds   String // JSON-encoded array of product IDs currently in the collection
+  updatedAt    DateTime @updatedAt
+
+  @@id([shop, collectionId])
+}

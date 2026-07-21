@@ -1,0 +1,85 @@
+# This file stores configurations for your Shopify app.
+client_id = "ab5e9d0aea9e4763dc98bfe87d48d59d"
+name = "product-log"
+application_url = "https://product-log-phi.vercel.app"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_products"
+
+[auth]
+redirect_urls = [
+  "https://product-log-phi.vercel.app/auth/callback",
+  "https://product-log-phi.vercel.app/auth/shopify/callback",
+  "https://product-log-phi.vercel.app/api/auth/callback"
+]
+
+[webhooks]
+api_version = "2025-10"
+
+  # Handled by: /app/routes/webhooks.app.uninstalled.tsx
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = ["app/uninstalled"]
+
+  # Handled by: /app/routes/webhooks.app.scopes_update.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  # Handled by: /app/routes/webhooks.products.create.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "products/create" ]
+  uri = "/webhooks/products/create"
+
+  # Handled by: /app/routes/webhooks.products.update.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "products/update" ]
+  uri = "/webhooks/products/update"
+
+  # Handled by: /app/routes/webhooks.products.delete.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "products/delete" ]
+  uri = "/webhooks/products/delete"
+
+  # Handled by: /app/routes/webhooks.collections.create.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "collections/create" ]
+  uri = "/webhooks/collections/create"
+
+  # Handled by: /app/routes/webhooks.collections.update.tsx
+  # Fires on collection metadata changes AND when products are added/removed
+  [[webhooks.subscriptions]]
+  topics = [ "collections/update" ]
+  uri = "/webhooks/collections/update"
+
+  # Handled by: /app/routes/webhooks.collections.delete.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "collections/delete" ]
+  uri = "/webhooks/collections/delete"
+
+  # Webhooks can have filters
+  # Only receive webhooks for product updates with a product price >= 10.00
+  # See: https://shopify.dev/docs/apps/build/webhooks/customize/filters
+  # [[webhooks.subscriptions]]
+  # topics = ["products/update"]
+  # uri = "/webhooks/products/update"
+  # filter = "variants.price:>=10.00"
+
+  # Mandatory compliance topic for public apps only
+  # See: https://shopify.dev/docs/apps/build/privacy-law-compliance
+  # [[webhooks.subscriptions]]
+  # uri = "/webhooks/customers/data_request"
+  # compliance_topics = ["customers/data_request"]
+
+  # [[webhooks.subscriptions]]
+  # uri = "/webhooks/customers/redact"
+  # compliance_topics = ["customers/redact"]
+
+  # [[webhooks.subscriptions]]
+  # uri = "/webhooks/shop/redact"
+  # compliance_topics = ["shop/redact"]
