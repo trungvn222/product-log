@@ -3,7 +3,7 @@ import type {
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { useFetcher, useLoaderData, useNavigate, useSearchParams } from "react-router";
+import { Form, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { Prisma } from "@prisma/client";
@@ -196,7 +196,6 @@ function ProductRow({
   pinned: boolean;
   onView: (productId: string) => void;
 }) {
-  const fetcher = useFetcher();
   const modalId = `history-${product.productId}`;
 
   return (
@@ -220,7 +219,7 @@ function ProductRow({
         </s-button>
       </s-table-cell>
       <s-table-cell>
-        <fetcher.Form method="post">
+        <Form method="post" reloadDocument>
           <input type="hidden" name="productId" value={product.productId} />
           <input type="hidden" name="intent" value={pinned ? "unpin" : "pin"} />
           <s-button
@@ -230,7 +229,7 @@ function ProductRow({
           >
             {pinned ? "Unpin" : "Pin"}
           </s-button>
-        </fetcher.Form>
+        </Form>
       </s-table-cell>
     </s-table-row>
   );
@@ -240,7 +239,6 @@ export default function Logs() {
   const { products, pinnedProducts, page, search, totalProducts, hasNextPage, hasPreviousPage } =
     useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
   const shopify = useAppBridge();
 
   const viewProduct = (productId: string) => {
@@ -249,10 +247,16 @@ export default function Logs() {
     });
   };
 
+  // Full-document navigation (not React Router's client-side navigate())
+  // on purpose: if the embedded session token happens to be stale on a
+  // client-side data fetch, the Shopify SDK throws an iframe-breakout HTML
+  // response that React Router v7's client data pipeline can't parse,
+  // rendering a bare "200" instead of the page. A hard navigation always
+  // goes through a fresh server-rendered document, sidestepping that path.
   const goToPage = (nextPage: number) => {
     const params = new URLSearchParams(searchParams);
     params.set("page", String(nextPage));
-    navigate(`/app/logs?${params.toString()}`);
+    window.location.href = `/app/logs?${params.toString()}`;
   };
 
   const runSearch = (value: string) => {
@@ -263,7 +267,7 @@ export default function Logs() {
       params.delete("q");
     }
     params.set("page", "1");
-    navigate(`/app/logs?${params.toString()}`);
+    window.location.href = `/app/logs?${params.toString()}`;
   };
 
   const allProducts = [...pinnedProducts, ...products];
