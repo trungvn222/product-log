@@ -2,7 +2,7 @@
   "name": "product-log",
   "private": true,
   "scripts": {
-    "build": "react-router build",
+    "build": "prisma generate && prisma migrate deploy && react-router build",
     "dev": "shopify app dev",
     "dev:ngrok": "node --env-file=.env scripts/dev.mjs",
     "dev:vite": "react-router dev",
