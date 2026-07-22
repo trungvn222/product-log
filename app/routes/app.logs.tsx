@@ -3,7 +3,7 @@ import type {
   HeadersFunction,
   LoaderFunctionArgs,
 } from "react-router";
-import { Form, useLoaderData, useSearchParams } from "react-router";
+import { useFetcher, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { Prisma } from "@prisma/client";
@@ -197,6 +197,7 @@ function ProductRow({
   onView: (productId: string) => void;
 }) {
   const modalId = `history-${product.productId}`;
+  const fetcher = useFetcher();
 
   return (
     <s-table-row clickDelegate={`open-${product.productId}`}>
@@ -219,7 +220,7 @@ function ProductRow({
         </s-button>
       </s-table-cell>
       <s-table-cell>
-        <Form method="post" reloadDocument>
+        <fetcher.Form method="post">
           <input type="hidden" name="productId" value={product.productId} />
           <input type="hidden" name="intent" value={pinned ? "unpin" : "pin"} />
           <s-button
@@ -229,7 +230,7 @@ function ProductRow({
           >
             {pinned ? "Unpin" : "Pin"}
           </s-button>
-        </Form>
+        </fetcher.Form>
       </s-table-cell>
     </s-table-row>
   );
