@@ -1,7 +1,12 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useNavigate, useSearchParams } from "react-router";
+import type {
+  ActionFunctionArgs,
+  HeadersFunction,
+  LoaderFunctionArgs,
+} from "react-router";
+import { useFetcher, useLoaderData, useNavigate, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { useAppBridge } from "@shopify/app-bridge-react";
+import { Prisma } from "@prisma/client";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { ACTION_LABELS, describeChange } from "../lib/log-display";
@@ -16,57 +21,43 @@ type LatestLogRow = {
   createdAt: Date;
 };
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const shop = session.shop;
+type ProductSummary = {
+  productId: string;
+  productTitle: string | null;
+  lastAction: string;
+  lastActor: string | null;
+  lastCreatedAt: string;
+  changeCount: number;
+  history: {
+    id: string;
+    action: string;
+    field: string | null;
+    oldValue: string | null;
+    newValue: string | null;
+    collectionTitle: string | null;
+    source: string;
+    actor: string | null;
+    createdAt: string;
+  }[];
+};
 
-  const url = new URL(request.url);
-  const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
-  const search = url.searchParams.get("q")?.trim() ?? "";
-  const skip = (page - 1) * PAGE_SIZE;
-  const searchPattern = `%${search}%`;
-
-  const [totalRows, latestPerProduct] = await Promise.all([
-    db.productLog.groupBy({
-      by: ["productId"],
-      where: {
-        shop,
-        OR: [
-          { productTitle: { contains: search, mode: "insensitive" } },
-          { productId: { contains: search, mode: "insensitive" } },
-        ],
-      },
-    }),
-    db.$queryRaw<LatestLogRow[]>`
-      SELECT * FROM (
-        SELECT DISTINCT ON ("productId") "productId", "productTitle", "action", "actor", "createdAt"
-        FROM "ProductLog"
-        WHERE "shop" = ${shop}
-          AND ("productTitle" ILIKE ${searchPattern} OR "productId" ILIKE ${searchPattern})
-        ORDER BY "productId", "createdAt" DESC
-      ) latest
-      ORDER BY "createdAt" DESC
-      LIMIT ${PAGE_SIZE} OFFSET ${skip}
-    `,
-  ]);
-
-  const totalProducts = totalRows.length;
-  const pageProductIds = latestPerProduct.map((row) => row.productId);
+async function summarize(
+  shop: string,
+  latestRows: LatestLogRow[],
+): Promise<ProductSummary[]> {
+  const productIds = latestRows.map((row) => row.productId);
+  if (productIds.length === 0) return [];
 
   const [counts, history] = await Promise.all([
-    pageProductIds.length
-      ? db.productLog.groupBy({
-          by: ["productId"],
-          where: { shop, productId: { in: pageProductIds } },
-          _count: { id: true },
-        })
-      : Promise.resolve([]),
-    pageProductIds.length
-      ? db.productLog.findMany({
-          where: { shop, productId: { in: pageProductIds } },
-          orderBy: { createdAt: "desc" },
-        })
-      : Promise.resolve([]),
+    db.productLog.groupBy({
+      by: ["productId"],
+      where: { shop, productId: { in: productIds } },
+      _count: { id: true },
+    }),
+    db.productLog.findMany({
+      where: { shop, productId: { in: productIds } },
+      orderBy: { createdAt: "desc" },
+    }),
   ]);
 
   const countByProductId = new Map(counts.map((c) => [c.productId, c._count.id]));
@@ -77,7 +68,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     historyByProductId.set(log.productId, list);
   }
 
-  const products = latestPerProduct.map((row) => ({
+  return latestRows.map((row) => ({
     productId: row.productId,
     productTitle: row.productTitle,
     lastAction: row.action,
@@ -96,9 +87,76 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       createdAt: log.createdAt.toISOString(),
     })),
   }));
+}
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { session } = await authenticate.admin(request);
+  const shop = session.shop;
+
+  const url = new URL(request.url);
+  const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
+  const search = url.searchParams.get("q")?.trim() ?? "";
+  const skip = (page - 1) * PAGE_SIZE;
+  const searchPattern = `%${search}%`;
+
+  const pinned = await db.pinnedProduct.findMany({
+    where: { shop },
+    orderBy: { createdAt: "desc" },
+  });
+  const pinnedIds = pinned.map((p) => p.productId);
+  const excludePinned = pinnedIds.length
+    ? Prisma.sql`AND "productId" NOT IN (${Prisma.join(pinnedIds)})`
+    : Prisma.empty;
+
+  const [totalRows, latestPerProduct, pinnedLatestRows] = await Promise.all([
+    db.productLog.groupBy({
+      by: ["productId"],
+      where: {
+        shop,
+        productId: { notIn: pinnedIds },
+        OR: [
+          { productTitle: { contains: search, mode: "insensitive" } },
+          { productId: { contains: search, mode: "insensitive" } },
+        ],
+      },
+    }),
+    db.$queryRaw<LatestLogRow[]>`
+      SELECT * FROM (
+        SELECT DISTINCT ON ("productId") "productId", "productTitle", "action", "actor", "createdAt"
+        FROM "ProductLog"
+        WHERE "shop" = ${shop}
+          AND ("productTitle" ILIKE ${searchPattern} OR "productId" ILIKE ${searchPattern})
+          ${excludePinned}
+        ORDER BY "productId", "createdAt" DESC
+      ) latest
+      ORDER BY "createdAt" DESC
+      LIMIT ${PAGE_SIZE} OFFSET ${skip}
+    `,
+    pinnedIds.length
+      ? db.$queryRaw<LatestLogRow[]>`
+          SELECT DISTINCT ON ("productId") "productId", "productTitle", "action", "actor", "createdAt"
+          FROM "ProductLog"
+          WHERE "shop" = ${shop} AND "productId" IN (${Prisma.join(pinnedIds)})
+          ORDER BY "productId", "createdAt" DESC
+        `
+      : Promise.resolve([]),
+  ]);
+
+  const totalProducts = totalRows.length;
+
+  const pinnedOrder = new Map(pinnedIds.map((id, index) => [id, index]));
+  pinnedLatestRows.sort(
+    (a, b) => (pinnedOrder.get(a.productId) ?? 0) - (pinnedOrder.get(b.productId) ?? 0),
+  );
+
+  const [products, pinnedProducts] = await Promise.all([
+    summarize(shop, latestPerProduct),
+    summarize(shop, pinnedLatestRows),
+  ]);
 
   return {
     products,
+    pinnedProducts,
     page,
     search,
     totalProducts,
@@ -107,8 +165,79 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
 };
 
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { session } = await authenticate.admin(request);
+  const shop = session.shop;
+
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+  const productId = String(formData.get("productId") ?? "");
+  if (!productId) return { ok: false };
+
+  if (intent === "pin") {
+    await db.pinnedProduct.upsert({
+      where: { shop_productId: { shop, productId } },
+      create: { shop, productId },
+      update: {},
+    });
+  } else if (intent === "unpin") {
+    await db.pinnedProduct.deleteMany({ where: { shop, productId } });
+  }
+
+  return { ok: true };
+};
+
+function ProductRow({
+  product,
+  pinned,
+  onView,
+}: {
+  product: ProductSummary;
+  pinned: boolean;
+  onView: (productId: string) => void;
+}) {
+  const fetcher = useFetcher();
+  const modalId = `history-${product.productId}`;
+
+  return (
+    <s-table-row clickDelegate={`open-${product.productId}`}>
+      <s-table-cell>
+        <s-link
+          id={`open-${product.productId}`}
+          command="--show"
+          commandFor={modalId}
+        >
+          {product.productTitle ?? product.productId}
+        </s-link>
+      </s-table-cell>
+      <s-table-cell>{ACTION_LABELS[product.lastAction] ?? product.lastAction}</s-table-cell>
+      <s-table-cell>{product.lastActor ?? "—"}</s-table-cell>
+      <s-table-cell>{new Date(product.lastCreatedAt).toLocaleString()}</s-table-cell>
+      <s-table-cell>{product.changeCount}</s-table-cell>
+      <s-table-cell>
+        <s-button variant="tertiary" onClick={() => onView(product.productId)}>
+          View product
+        </s-button>
+      </s-table-cell>
+      <s-table-cell>
+        <fetcher.Form method="post">
+          <input type="hidden" name="productId" value={product.productId} />
+          <input type="hidden" name="intent" value={pinned ? "unpin" : "pin"} />
+          <s-button
+            type="submit"
+            variant="tertiary"
+            icon={pinned ? "pin-remove" : "pin"}
+          >
+            {pinned ? "Unpin" : "Pin"}
+          </s-button>
+        </fetcher.Form>
+      </s-table-cell>
+    </s-table-row>
+  );
+}
+
 export default function Logs() {
-  const { products, page, search, totalProducts, hasNextPage, hasPreviousPage } =
+  const { products, pinnedProducts, page, search, totalProducts, hasNextPage, hasPreviousPage } =
     useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -137,8 +266,36 @@ export default function Logs() {
     navigate(`/app/logs?${params.toString()}`);
   };
 
+  const allProducts = [...pinnedProducts, ...products];
+
   return (
     <s-page heading="Product logs">
+      {pinnedProducts.length > 0 && (
+        <s-section heading={`Pinned (${pinnedProducts.length})`}>
+          <s-table variant="auto">
+            <s-table-header-row>
+              <s-table-header>Product</s-table-header>
+              <s-table-header>Last activity</s-table-header>
+              <s-table-header>Changed by</s-table-header>
+              <s-table-header>Last updated</s-table-header>
+              <s-table-header>Changes</s-table-header>
+              <s-table-header>View product</s-table-header>
+              <s-table-header>Pin</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {pinnedProducts.map((product) => (
+                <ProductRow
+                  key={product.productId}
+                  product={product}
+                  pinned
+                  onView={viewProduct}
+                />
+              ))}
+            </s-table-body>
+          </s-table>
+        </s-section>
+      )}
+
       <s-section heading={`Products with activity (${totalProducts})`}>
         <s-search-field
           label="Search products"
@@ -169,49 +326,23 @@ export default function Logs() {
               <s-table-header>Last updated</s-table-header>
               <s-table-header>Changes</s-table-header>
               <s-table-header>View product</s-table-header>
+              <s-table-header>Pin</s-table-header>
             </s-table-header-row>
             <s-table-body>
-              {products.map((product) => {
-                const modalId = `history-${product.productId}`;
-                return (
-                  <s-table-row
-                    key={product.productId}
-                    clickDelegate={`open-${product.productId}`}
-                  >
-                    <s-table-cell>
-                      <s-link
-                        id={`open-${product.productId}`}
-                        command="--show"
-                        commandFor={modalId}
-                      >
-                        {product.productTitle ?? product.productId}
-                      </s-link>
-                    </s-table-cell>
-                    <s-table-cell>
-                      {ACTION_LABELS[product.lastAction] ?? product.lastAction}
-                    </s-table-cell>
-                    <s-table-cell>{product.lastActor ?? "—"}</s-table-cell>
-                    <s-table-cell>
-                      {new Date(product.lastCreatedAt).toLocaleString()}
-                    </s-table-cell>
-                    <s-table-cell>{product.changeCount}</s-table-cell>
-                    <s-table-cell>
-                      <s-button
-                        variant="tertiary"
-                        onClick={() => viewProduct(product.productId)}
-                      >
-                        View product
-                      </s-button>
-                    </s-table-cell>
-                  </s-table-row>
-                );
-              })}
+              {products.map((product) => (
+                <ProductRow
+                  key={product.productId}
+                  product={product}
+                  pinned={false}
+                  onView={viewProduct}
+                />
+              ))}
             </s-table-body>
           </s-table>
         )}
       </s-section>
 
-      {products.map((product) => {
+      {allProducts.map((product) => {
         const modalId = `history-${product.productId}`;
         return (
           <s-modal

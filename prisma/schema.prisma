@@ -69,3 +69,11 @@ model CollectionSnapshot {
 
   @@id([shop, collectionId])
 }
+
+model PinnedProduct {
+  shop      String
+  productId String
+  createdAt DateTime @default(now())
+
+  @@id([shop, productId])
+}
