@@ -38,6 +38,7 @@ model ProductLog {
   shop           String
   productId      String
   productTitle   String?
+  productImage   String? // featured image URL, best-effort, from products/create|update webhook payloads
   action         String // created | updated | deleted | added_to_collection | removed_from_collection
   field          String? // e.g. title, price, status, tags (null for created/deleted/collection actions)
   oldValue       String?

@@ -8,6 +8,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const productId = String(payload.id);
   const productTitle = (payload.title as string) ?? null;
+  const productImage =
+    ((payload.image as { src?: string } | null)?.src as string | undefined) ?? null;
   const gid =
     (payload.admin_graphql_api_id as string) ??
     `gid://shopify/Product/${productId}`;
@@ -20,6 +22,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         shop,
         productId,
         productTitle,
+        productImage,
         action: "created",
         source: topic,
         actor,

@@ -22,6 +22,7 @@ type ProductPayload = {
   tags?: string;
   variants?: VariantPayload[];
   admin_graphql_api_id?: string;
+  image?: { src?: string } | null;
 };
 
 const SCALAR_FIELDS = [
@@ -46,6 +47,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const product = payload as unknown as ProductPayload;
   const productId = String(product.id);
   const productTitle = product.title ?? null;
+  const productImage = product.image?.src ?? null;
   const gid =
     product.admin_graphql_api_id ?? `gid://shopify/Product/${productId}`;
 
@@ -143,6 +145,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           shop,
           productId,
           productTitle,
+          productImage,
           action: entry.action,
           field: entry.field,
           oldValue: entry.oldValue,

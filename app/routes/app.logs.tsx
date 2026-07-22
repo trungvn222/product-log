@@ -24,6 +24,7 @@ type LatestLogRow = {
 type ProductSummary = {
   productId: string;
   productTitle: string | null;
+  productImage: string | null;
   lastAction: string;
   lastActor: string | null;
   lastCreatedAt: string;
@@ -48,7 +49,7 @@ async function summarize(
   const productIds = latestRows.map((row) => row.productId);
   if (productIds.length === 0) return [];
 
-  const [counts, history] = await Promise.all([
+  const [counts, history, images] = await Promise.all([
     db.productLog.groupBy({
       by: ["productId"],
       where: { shop, productId: { in: productIds } },
@@ -58,8 +59,17 @@ async function summarize(
       where: { shop, productId: { in: productIds } },
       orderBy: { createdAt: "desc" },
     }),
+    db.$queryRaw<{ productId: string; productImage: string | null }[]>`
+      SELECT DISTINCT ON ("productId") "productId", "productImage"
+      FROM "ProductLog"
+      WHERE "shop" = ${shop}
+        AND "productId" IN (${Prisma.join(productIds)})
+        AND "productImage" IS NOT NULL
+      ORDER BY "productId", "createdAt" DESC
+    `,
   ]);
 
+  const imageByProductId = new Map(images.map((i) => [i.productId, i.productImage]));
   const countByProductId = new Map(counts.map((c) => [c.productId, c._count.id]));
   const historyByProductId = new Map<string, typeof history>();
   for (const log of history) {
@@ -71,6 +81,7 @@ async function summarize(
   return latestRows.map((row) => ({
     productId: row.productId,
     productTitle: row.productTitle,
+    productImage: imageByProductId.get(row.productId) ?? null,
     lastAction: row.action,
     lastActor: row.actor,
     lastCreatedAt: row.createdAt.toISOString(),
@@ -202,6 +213,17 @@ function ProductRow({
   return (
     <s-table-row clickDelegate={`open-${product.productId}`}>
       <s-table-cell>
+        {product.productImage ? (
+          <s-thumbnail
+            src={product.productImage}
+            alt={product.productTitle ?? product.productId}
+            size="small"
+          />
+        ) : (
+          "—"
+        )}
+      </s-table-cell>
+      <s-table-cell>
         <s-link
           id={`open-${product.productId}`}
           command="--show"
@@ -279,6 +301,7 @@ export default function Logs() {
         <s-section heading={`Pinned (${pinnedProducts.length})`}>
           <s-table variant="auto">
             <s-table-header-row>
+              <s-table-header>Thumb</s-table-header>
               <s-table-header>Product</s-table-header>
               <s-table-header>Last activity</s-table-header>
               <s-table-header>Changed by</s-table-header>
@@ -325,6 +348,7 @@ export default function Logs() {
             onPreviousPage={() => goToPage(page - 1)}
           >
             <s-table-header-row>
+              <s-table-header>Thumb</s-table-header>
               <s-table-header>Product</s-table-header>
               <s-table-header>Last activity</s-table-header>
               <s-table-header>Changed by</s-table-header>
